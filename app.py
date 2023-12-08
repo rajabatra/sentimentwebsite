@@ -17,7 +17,7 @@ nltk.download('stopwords')
 
 app = Flask(__name__)
 
-NEWS_API_KEY = '98f067ed42ce4004ac1c01a5e6eeb31f'
+NEWS_API_KEY = 'hide'
 JSON_FILE_PATH = 'headlines.json'
 LAST_UPDATE_TIME = None
 
