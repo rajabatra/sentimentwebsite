@@ -10,6 +10,7 @@ from nltk.corpus import stopwords
 import string
 from datetime import datetime, timedelta
 import pytz
+from transformermodel import analyze_sentiment, TransformerClassifier, PositionalEncoding
 
 # Download the NLTK stop words (do this once in your script or in a setup step)
 import nltk
@@ -17,8 +18,9 @@ nltk.download('stopwords')
 
 app = Flask(__name__)
 
-NEWS_API_KEY = 'hide'
+NEWS_API_KEY = '98f067ed42ce4004ac1c01a5e6eeb31f'
 JSON_FILE_PATH = 'headlines.json'
+SENTIMENT_JSON_PATH = 'sentiment_data.json'
 LAST_UPDATE_TIME = None
 
 def fetch_and_update_headlines():
@@ -46,7 +48,8 @@ def fetch_and_update_headlines():
 
     # Create a dictionary with word frequencies
     word_frequency_dict = Counter(filtered_words)
-
+    
+    
     # Save the headlines and word frequency data to a JSON file
     with open(JSON_FILE_PATH, 'w') as json_file:
         json.dump({
@@ -59,6 +62,34 @@ def fetch_and_update_headlines():
     print('Headlines updated and stored.')
    
 
+def store_sentiment_and_date(sentiment, date):
+    try:
+        # Load existing sentiment data from JSON
+        with open(SENTIMENT_JSON_PATH, 'r') as sentiment_file:
+            sentiment_data = json.load(sentiment_file)
+    except FileNotFoundError:
+        sentiment_data = []
+
+    # Append new sentiment and date
+    sentiment_data.append({'sentiment': sentiment, 'date': date})
+
+    # Save sentiment data to JSON file
+    with open(SENTIMENT_JSON_PATH, 'w') as sentiment_file:
+        json.dump(sentiment_data, sentiment_file)
+
+SENTIMENT_JSON_PATH = 'sentiment_data.json'
+
+
+def load_sentiment_data_from_json():
+    try:
+        # Load sentiment data from the JSON file
+        with open(SENTIMENT_JSON_PATH, 'r') as sentiment_file:
+            sentiment_data = json.load(sentiment_file)
+    except FileNotFoundError:
+        sentiment_data = []
+
+    return sentiment_data
+
 def schedule_daily_update():
     # Schedule the daily update at noon Pacific time
     schedule.every().day.at("12:00").do(fetch_and_update_headlines).tz_localize(pytz.timezone("America/Los_Angeles"))
@@ -66,12 +97,21 @@ def schedule_daily_update():
 
 def load_headlines_from_json():
     try:
+        
         # Load headlines and word frequency data from the JSON file
         with open(JSON_FILE_PATH, 'r') as json_file:
             data = json.load(json_file)
         
         headlines_for_wordcloud = data.get('headlines', [])
         word_frequency_dict = data.get('word_frequency', {})
+        
+        if not headlines_for_wordcloud or not word_frequency_dict:
+            fetch_and_update_headlines()
+            # Load again after updating
+            with open(JSON_FILE_PATH, 'r') as updated_json_file:
+                updated_data = json.load(updated_json_file)
+            headlines_for_wordcloud = updated_data.get('headlines', [])
+            word_frequency_dict = updated_data.get('word_frequency', {})
 
     except FileNotFoundError:
         headlines_for_wordcloud = []
@@ -91,7 +131,7 @@ def index():
         headlines_for_wordcloud, word_frequency_dict = load_headlines_from_json()
 
     # Perform sentiment analysis using TextBlob
-    positive_headlines = sum(TextBlob(headline).sentiment.polarity > 0 for headline in headlines_for_wordcloud)
+    positive_headlines = sum(analyze_sentiment(headline) > 0.5 for headline in headlines_for_wordcloud)
 
 
     
@@ -99,6 +139,10 @@ def index():
     total_headlines = len(headlines_for_wordcloud)
     positive_percentage = (positive_headlines / total_headlines) * 100 if total_headlines > 0 else 0
     formatted_percentage = "{:.2f}".format(positive_percentage)
+
+    #store sentiment
+    store_sentiment_and_date(formatted_percentage, LAST_UPDATE_TIME)
+    sentiment_data = load_sentiment_data_from_json()
 
     # Calculate the time remaining until the next update
     next_update_time = datetime.strptime(LAST_UPDATE_TIME, "%Y-%m-%d %H:%M:%S") + timedelta(days=1)
@@ -111,7 +155,7 @@ def index():
 
     
 
-    return render_template('index.html', positive_percentage=formatted_percentage, wordFrequencyData=json.dumps(word_frequency_dict), lastUpdateTime=LAST_UPDATE_TIME, timeRemainingHours=hours, timeRemainingMinutes=minutes)
+    return render_template('index.html', positive_percentage=formatted_percentage, wordFrequencyData=json.dumps(word_frequency_dict), lastUpdateTime=LAST_UPDATE_TIME, timeRemainingHours=hours, timeRemainingMinutes=minutes, graphdata = json.dumps(sentiment_data))
 
 # Run the scheduler in a separate thread
 if __name__ == '__main__':
